@@ -13,4 +13,4 @@
 # limitations under the License.
 
 #/bin/bash
-java -Djava.security.properties=./config/java.security -Dlogback.configurationFile="./config/logback.xml" -cp ./lib/*:./bin/ com.yahoo.ycsb.Client -threads 150 -P config/workloads/workloada -p measurementtype=timeseries -p timeseries.granularity=1000 -db bftsmart.demo.ycsb.YCSBClient -s
+java -Djava.security.properties=./config/java.security -Dlogback.configurationFile="./config/logback.xml" -cp ./lib/*:./bin/ com.yahoo.ycsb.Client -threads 30 -P config/workloads/workloada -p measurementtype=timeseries -p timeseries.granularity=1000 -db bftsmart.demo.ycsb.YCSBClient -s
