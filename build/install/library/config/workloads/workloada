@@ -32,8 +32,8 @@ workload=com.yahoo.ycsb.workloads.CoreWorkload
 
 readallfields=true
 
-readproportion=0.1
-updateproportion=0.9
+readproportion=0.5
+updateproportion=0.5
 scanproportion=0
 insertproportion=0
 
@@ -42,3 +42,5 @@ requestdistribution=zipfian
 maxexecutiontime=60
 
 smart-initkey=1000
+hotspotdatafraction=0.1
+hotspotopnfraction=0.9
