@@ -109,6 +109,7 @@ def run_experiment(row, ssh_clients, replica_pids):
             f"cd ~/BFT-Smart/build/install/library && "
             f"./startReplicaYCSB.sh {node_id}"
         )
+        print(f"  [{node_name}] Starting replica with command: {replica_cmd}")
         pids[node_name] = ssh_run_background(client, replica_cmd, node_name)
 
     time.sleep(5)  # Give replicas time to start
