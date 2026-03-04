@@ -100,7 +100,7 @@ if __name__ == "__main__":
     print(f"YCSB: read={args.readproportion}, update={args.updateproportion}, hotspot_data={args.hotspotdatafraction}, hotspot_opn={args.hotspotopnfraction}")
     
     # 1. Delete CurrentView
-    if not delete_file_in_script_dir('CurrentView'):
+    if not delete_file_in_script_dir('currentView'):
         sys.exit(1)
     
     # 2. Update system.config
