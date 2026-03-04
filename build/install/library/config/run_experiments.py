@@ -13,8 +13,8 @@ import paramiko
 # ycsbClient.sh is at: ./BFT-SMART/build/install/library/
 SCRIPT_DIR      = os.path.dirname(os.path.abspath(__file__))
 YCSB_CLIENT     = os.path.join(SCRIPT_DIR, '..', 'ycsbClient.sh')
-UPDATE_CONFIG   = './BFT-SMART/build/install/library/config/update_system_config.py'
-START_REPLICA   = './BFT-SMART/build/install/library/startReplicaYCSB.sh'
+UPDATE_CONFIG   = 'BFT-Smart/build/install/library/config/update_system_config.py'
+START_REPLICA   = 'BFT-Smart/build/install/library/startReplicaYCSB.sh'
 
 # Node host IDs (hardcoded)
 NODES = {
@@ -104,7 +104,11 @@ def run_experiment(row, ssh_clients, replica_pids):
     pids = {}
     for node_name, client in ssh_clients.items():
         node_id = node_name.split('-')[1]
-        replica_cmd = f"{START_REPLICA} {node_id}"
+        # replica_cmd = f"{START_REPLICA} {node_id}"
+        replica_cmd = (
+            f"cd ~/BFT-Smart/build/install/library && "
+            f"./startReplicaYCSB.sh {node_id}"
+        )
         pids[node_name] = ssh_run_background(client, replica_cmd, node_name)
 
     time.sleep(5)  # Give replicas time to start
