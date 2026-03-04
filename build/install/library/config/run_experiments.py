@@ -50,7 +50,7 @@ def ssh_run_blocking(client, cmd, node_name):
 
 def ssh_run_background(client, cmd, node_name):
     """Run command in background, return PID for later kill."""
-    bg_cmd = f"nohup {cmd} > /tmp/replica_{node_name}.log 2>&1 & echo $!"
+    bg_cmd = f"nohup bash -c '{cmd}' > /tmp/replica_{node_name}.log 2>&1 & echo $!"
     _, stdout, _ = client.exec_command(bg_cmd)
     pid = stdout.read().decode().strip()
     print(f"  [{node_name}] Started background PID={pid}")
