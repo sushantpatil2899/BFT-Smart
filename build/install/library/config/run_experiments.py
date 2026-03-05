@@ -10,15 +10,15 @@ import re
 import time
 import paramiko
 
-# Script is at: ./BFT-SMART/build/install/library/config/
-# ycsbClient.sh is at: ./BFT-SMART/build/install/library/
 SCRIPT_DIR      = os.path.dirname(os.path.abspath(__file__))
 YCSB_CLIENT     = os.path.join(SCRIPT_DIR, '..', 'ycsbClient.sh')
 UPDATE_CONFIG   = 'BFT-Smart/build/install/library/config/update_system_config.py'
 START_REPLICA   = 'BFT-Smart/build/install/library/startReplicaYCSB.sh'
 RESULTS_CSV     = os.path.join(SCRIPT_DIR, 'experiments_result.csv')
 
-# Results CSV columns
+# Skip already-completed runs (set to 1 to run all)
+START_FROM_RUN  = 1
+
 RESULT_COLUMNS = [
     'run_id', 'batchtimeout', 'maxbatchsize', 'numrepliers',
     'readproportion', 'updateproportion', 'hotspotdatafraction',
@@ -28,7 +28,6 @@ RESULT_COLUMNS = [
     'update_operations', 'update_avg_latency_us', 'update_min_latency_us', 'update_max_latency_us'
 ]
 
-# Node host IDs (hardcoded)
 NODES = {
     'node-0': 'clnode154.clemson.cloudlab.us',
     'node-1': 'clnode167.clemson.cloudlab.us',
@@ -73,18 +72,68 @@ def ssh_run_background(client, cmd, node_name):
 
 
 def kill_replica(client, pid, node_name):
-    """Kill the background replica process by PID."""
+    """Force kill replica shell wrapper + any lingering Java YCSBServer process."""
+    # Kill the nohup shell wrapper
     if pid:
-        _, stdout, _ = client.exec_command(f"kill {pid} 2>/dev/null; echo done")
+        client.exec_command(f"kill -9 {pid} 2>/dev/null")
+
+    # Force kill any surviving Java YCSBServer (the real process)
+    _, stdout, _ = client.exec_command(
+        "pkill -9 -f 'bftsmart.demo.ycsb.YCSBServer' 2>/dev/null; echo done"
+    )
+    stdout.channel.recv_exit_status()
+    print(f"  [{node_name}] Force killed replica (PID={pid})")
+
+
+def wait_for_ports_free(ssh_clients, port_pattern="1100", max_wait=30):
+    """Wait until BFT-SMaRt ports are released on all nodes."""
+    print("  Waiting for ports to release...")
+    waited = 0
+    while waited < max_wait:
+        all_free = True
+        for node_name, client in ssh_clients.items():
+            _, stdout, _ = client.exec_command(
+                f"ss -tlnp | grep '{port_pattern}' | wc -l"
+            )
+            count = stdout.read().decode().strip()
+            if count != '0':
+                print(f"  ⚠️  [{node_name}] Ports still in use ({count} sockets)...")
+                all_free = False
+        if all_free:
+            print("  ✅ All ports free!")
+            return
+        time.sleep(5)
+        waited += 5
+
+    print(f"  ⚠️  Ports did not fully release after {max_wait}s — proceeding anyway.")
+
+
+def force_kill_all_nodes(ssh_clients):
+    """Forcefully kill any YCSBServer processes on all nodes (used at startup and cleanup)."""
+    print("\n[CLEANUP] Force killing any existing YCSBServer processes...")
+    for node_name, client in ssh_clients.items():
+        _, stdout, _ = client.exec_command(
+            "pkill -9 -f 'bftsmart.demo.ycsb.YCSBServer' 2>/dev/null; echo done"
+        )
         stdout.channel.recv_exit_status()
-        print(f"  [{node_name}] Killed PID={pid}")
+        result = stdout.read().decode().strip()
+        print(f"  [{node_name}] Cleaned up")
+
+
+def kill_all_replicas(ssh_clients, pids):
+    """Kill replicas on all nodes and wait for ports to be fully released."""
+    if not pids:
+        return
+    print("\n[CLEANUP] Killing replicas...")
+    for node_name, client in ssh_clients.items():
+        kill_replica(client, pids.get(node_name), node_name)
+
+    # Wait for ports to actually free up before next run
+    wait_for_ports_free(ssh_clients, port_pattern="1100", max_wait=30)
 
 
 def parse_ycsb_output(ycsb_output_file):
-    """
-    Parse YCSB output file and extract key metrics.
-    Returns dict with 9 metrics, or None values if parsing fails.
-    """
+    """Parse YCSB output file and extract key metrics."""
     metrics = {
         'throughput_ops_sec':     None,
         'read_operations':        None,
@@ -133,21 +182,18 @@ def write_result_row(row, metrics):
 
     with open(RESULTS_CSV, 'a', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=RESULT_COLUMNS)
-
-        # Write header only once
         if not file_exists:
             writer.writeheader()
-
         result_row = {
-            'run_id':                row['run_id'],
-            'batchtimeout':          row['batchtimeout'],
-            'maxbatchsize':          row['maxbatchsize'],
-            'numrepliers':           row['numrepliers'],
-            'readproportion':        row['readproportion'],
-            'updateproportion':      row['updateproportion'],
-            'hotspotdatafraction':   row['hotspotdatafraction'],
-            'hotspotopnfraction':    row['hotspotopnfraction'],
-            'threads':               row['threads'],
+            'run_id':              row['run_id'],
+            'batchtimeout':        row['batchtimeout'],
+            'maxbatchsize':        row['maxbatchsize'],
+            'numrepliers':         row['numrepliers'],
+            'readproportion':      row['readproportion'],
+            'updateproportion':    row['updateproportion'],
+            'hotspotdatafraction': row['hotspotdatafraction'],
+            'hotspotopnfraction':  row['hotspotopnfraction'],
+            'threads':             row['threads'],
             **metrics
         }
         writer.writerow(result_row)
@@ -179,7 +225,7 @@ def run_experiment(row, ssh_clients):
     print(f"{'='*60}")
 
     # --- STEP 1: Update config on all nodes ---
-    print("\n[1/3] Updating configs on all nodes...")
+    print("\n[1/4] Updating configs on all nodes...")
     for node_name, client in ssh_clients.items():
         update_cmd = (
             f"python3 {UPDATE_CONFIG} "
@@ -192,7 +238,7 @@ def run_experiment(row, ssh_clients):
             return None
 
     # --- STEP 2: Start replicas in background on all nodes ---
-    print("\n[2/3] Starting replicas on all nodes...")
+    print("\n[2/4] Starting replicas on all nodes...")
     pids = {}
     for node_name, client in ssh_clients.items():
         node_id = node_name.split('-')[1]
@@ -206,14 +252,13 @@ def run_experiment(row, ssh_clients):
     time.sleep(15)  # Give replicas time to start and form quorum
 
     # --- STEP 3: Run YCSB client locally ---
-    print(f"\n[3/3] Running YCSB client (threads={threads}, run_id={run_id})...")
+    print(f"\n[3/4] Running YCSB client (threads={threads}, run_id={run_id})...")
     ycsb_cmd = f"bash {YCSB_CLIENT} {threads} {run_id}"
     exit_code = os.system(ycsb_cmd)
     print(f"  YCSB exited with code: {exit_code}")
 
     # --- STEP 4: Parse output and write result row ---
     print(f"\n[4/4] Parsing YCSB output...")
-    # Find the output file: ycsb_results_{threads}threads_{run_id}_*.txt
     ycsb_dir = os.path.join(SCRIPT_DIR, '..')
     ycsb_output_file = None
     for f in os.listdir(ycsb_dir):
@@ -232,18 +277,7 @@ def run_experiment(row, ssh_clients):
         ]}
 
     write_result_row(row, metrics)
-
     return pids
-
-
-def kill_all_replicas(ssh_clients, pids):
-    """Kill replicas on all nodes."""
-    if not pids:
-        return
-    print("\n[CLEANUP] Killing replicas...")
-    for node_name, client in ssh_clients.items():
-        kill_replica(client, pids.get(node_name), node_name)
-    time.sleep(3)
 
 
 if __name__ == "__main__":
@@ -261,10 +295,19 @@ if __name__ == "__main__":
     for node_name, hostname in NODES.items():
         ssh_clients[node_name] = get_ssh_client(hostname)
 
+    # ✅ Kill any leftover replicas before starting
+    force_kill_all_nodes(ssh_clients)
+    wait_for_ports_free(ssh_clients, port_pattern="1100", max_wait=30)
+
     prev_pids = None
 
     try:
         for i, row in enumerate(rows):
+            # ✅ Skip already-completed runs
+            if int(row['run_id']) < START_FROM_RUN:
+                print(f"  ⏭️  Skipping run {row['run_id']} (START_FROM_RUN={START_FROM_RUN})")
+                continue
+
             if prev_pids is not None:
                 kill_all_replicas(ssh_clients, prev_pids)
 
@@ -282,6 +325,7 @@ if __name__ == "__main__":
             kill_all_replicas(ssh_clients, prev_pids)
 
     finally:
+        force_kill_all_nodes(ssh_clients)
         for client in ssh_clients.values():
             client.close()
         print("SSH connections closed.")
