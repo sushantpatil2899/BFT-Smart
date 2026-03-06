@@ -42,10 +42,10 @@ RESULT_COLUMNS = [
 ]
 
 NODES = {
-    'node-0': 'clnode154.clemson.cloudlab.us',
-    'node-1': 'clnode167.clemson.cloudlab.us',
-    'node-2': 'clnode178.clemson.cloudlab.us',
-    'node-3': 'clnode153.clemson.cloudlab.us',
+    'node-0': 'clnode004.clemson.cloudlab.us',
+    'node-1': 'clnode096.clemson.cloudlab.us',
+    'node-2': 'clnode093.clemson.cloudlab.us',
+    'node-3': 'clnode055.clemson.cloudlab.us',
 }
 
 
